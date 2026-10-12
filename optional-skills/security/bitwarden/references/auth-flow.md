@@ -12,6 +12,10 @@ The `bw` CLI has two phases:
    password. Returns a **session key** that must be passed to all subsequent
    vault-data commands (via `BW_SESSION` env var or `--session` flag).
 
+> **Standard:** the master password comes from Apple Keychain (service
+> `Bitworden-Master`) via `bw-unlock.sh` — never `.env`. See
+> [keychain](keychain.md).
+
 The session key is ephemeral — it lives only in the current process/shell.
 When the session ends, the vault is still "locked" and you must unlock again.
 
@@ -70,6 +74,23 @@ bw login --sso
 
 ## Unlock (generate session key)
 
+### Standard (macOS) — master password from Apple Keychain
+
+**BW Master Pass comes from Apple Keychain — this is the standing standard
+for the BW integration.** The helper script resolves it on every unlock;
+no `.env` entry and no password file is involved:
+
+```bash
+source scripts/bw-unlock.sh          # env -> Keychain(Bitwarden-Master) -> error
+```
+
+Under the hood:
+
+```bash
+export BW_PASSWORD="$(security find-generic-password -s "Bitwarden-Master" -w)"
+export BW_SESSION="$(bw unlock --passwordenv BW_PASSWORD --raw)"
+```
+
 ### Interactive
 
 ```bash
@@ -77,17 +98,14 @@ bw unlock
 # prompts for master password
 ```
 
-### Non-interactive (for Hermes)
+### Non-interactive fallback (no Keychain — Linux/Windows)
 
 ```bash
-# Via env var set in .env
+# Via env var (last resort — never use on macOS, where Keychain is standard)
 bw unlock --passwordenv BW_PASSWORD --raw
 
-# Via password file (protect the file!)
+# Via password file (protect the file! chmod 600)
 bw unlock --passwordfile ~/.bitwarden/mp.txt --raw
-
-# Capture and export in one step
-export BW_SESSION=$(bw unlock --raw)
 ```
 
 ## Session key lifecycle
@@ -104,9 +122,9 @@ export BW_SESSION=$(bw unlock --raw)
 | Variable | Purpose | Required for |
 |---|---|---|
 | `BW_SESSION` | Active session key | All vault-data commands (`get`, `list`, `create`, ...) |
-| `BW_CLIENTID` | API key client ID | `bw login --apikey` |
-| `BW_CLIENTSECRET` | API key client secret | `bw login --apikey` |
-| `BW_PASSWORD` | Master password | `bw unlock --passwordenv` |
+| `BW_CLIENTID` | API key client ID | `bw login --apikey` (resolved from Keychain `Bitworder-ClientID` by the helper) |
+| `BW_CLIENTSECRET` | API key client secret | `bw login --apikey` (resolved from Keychain `Bitworder-ClientSecret` by the helper) |
+| `BW_PASSWORD` | Master password | `bw unlock --passwordenv` — **fallback only on macOS**; the standard is Keychain `Bitworden-Master` |
 | `BITWARDENCLI_APPDATA_DIR` | Alternate config dir | Multi-account login |
 | `BITWARDEN_DESKTOP_PROXY_PATH` | Custom desktop app path | Biometric unlock via desktop app |
 | `BITWARDENCLI_DEBUG` | Enable debug output | Troubleshooting |
@@ -115,28 +133,20 @@ export BW_SESSION=$(bw unlock --raw)
 ## Hermes pattern
 
 In Hermes' `terminal` tool, each call starts a fresh shell — `BW_SESSION`
-from a previous call is lost. Two patterns work:
-
-**Pattern A — one-liner (simplest):**
-
-```bash
-export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw) && bw get password github
-```
-
-**Pattern B — helper script (recommended for multi-step):**
+from a previous call is lost. **The standard pattern is the helper script** —
+it resolves the master password from Apple Keychain (`Bitwarden-Master`), so
+no `.env` entry is needed:
 
 ```bash
 source skills/security/bitwarden/scripts/bw-unlock.sh && bw get password github
 ```
 
 The helper script (`bw-unlock.sh`) checks if an existing session is still
-valid, logs in if needed (via API key), unlocks via `BW_PASSWORD`, and sets
-`BW_SESSION` — all in one `source` call.
+valid, logs in if needed (API key from Keychain), unlocks with the master
+password from Keychain, and sets `BW_SESSION` — all in one `source` call.
 
-**Pattern C — Keychain-based (macOS only):**
+**Fallback one-liner** (no Keychain — Linux/Windows only):
 
-If `BW_PASSWORD` is not set in the environment, the helper script
-automatically retrieves the master password from Apple Keychain (service
-name `Bitwarden-Master`) before falling back to an error. No `.env` entry
-is needed — just ensure the Keychain entry exists. See
-[keychain](keychain.md) for one-time setup and service naming conventions.
+```bash
+export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw) && bw get password github
+```

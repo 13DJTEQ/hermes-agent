@@ -6,15 +6,18 @@
 # Usage:
 #   source scripts/bw-unlock.sh && bw get password my-service
 #
-# Env vars (set in ~/.hermes/.env):
-#   BW_CLIENTID     - API key client ID (optional, for `bw login --apikey`)
-#   BW_CLIENTSECRET - API key client secret (optional)
-#   BW_PASSWORD     - master password (required for `bw unlock`)
+# CREDENTIAL STANDARD: BW Master Pass comes from Apple Keychain (service
+# Bitwarden-Master) — never from .env or a password file on macOS. This
+# script enforces it: on every unlock it resolves the master password from
+# env, then Keychain, then hard-errors. Same for the API-key halves
+# (Bitworder-ClientID / Bitworder-ClientSecret) used for `bw login --apikey`.
+# See references/keychain.md for one-time setup.
 #
-# macOS fallback: if BW_PASSWORD / BW_CLIENTID / BW_CLIENTSECRET are not set,
-# the script attempts to retrieve them from Apple Keychain (service names:
-# Bitwarden-Master, Bitworder-ClientID, Bitworder-ClientSecret). See
-# references/keychain.md for one-time setup.
+# Optional env vars (only as an override or on non-macOS):
+#   BW_CLIENTID     - API key client ID (override for `bw login --apikey`)
+#   BW_CLIENTSECRET - API key client secret (override)
+#   BW_PASSWORD     - master password (override; fallback on Linux/Windows
+#                     where no Keychain exists — protect with chmod 600 files)
 #
 # Requires: `bw` on PATH. `jq` is preferred for JSON parsing but NOT required —
 # the script falls back to grep for status extraction when jq is absent.

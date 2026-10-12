@@ -39,10 +39,14 @@ vault. Authentication (login) requires your Bitwarden account; see
 
 - BitWarden CLI (`bw`) installed — see [get-started](references/get-started.md)
 - A BitWarden account, logged in via `bw login` (email, API key, or SSO)
-- For non-interactive unlock: either `BW_PASSWORD` set in
-  `${HERMES_HOME:-~/.hermes}/.env` (master password) **or**, on macOS,
-  the master password stored in Apple Keychain (service name
-  `Bitwarden-Master`). See [keychain](references/keychain.md).
+- **The master password lives in Apple Keychain (service `Bitwarden-Master`) —
+  this is the standing standard for this integration, never `.env`.** The
+  `scripts/bw-unlock.sh` helper retrieves it via
+  `security find-generic-password -s "Bitwarden-Master" -w` on every unlock.
+  API-key halves use `Bitworder-ClientID` / `Bitworder-ClientSecret`.
+  See [keychain](references/keychain.md) for one-time setup. A `BW_PASSWORD`
+  env var (or `--passwordfile` on Linux/Windows) is only a fallback for
+  environments without Keychain.
 
 ## How to Run
 
@@ -55,14 +59,20 @@ unlock → session → lock lifecycle.
 # 1. Check status
 bw status | jq -r '.status'
 
-# 2. Unlock (non-interactive via password env var)
-terminal(command="export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw)")
+# 2. Unlock — STANDARD: helper script pulls the master password from
+#    Apple Keychain (Bitwarden-Master); no .env entry needed
+terminal(command="source skills/security/bitwarden/scripts/bw-unlock.sh && bw get password github")
 
-# 3. Now vault-data commands work
-terminal(command="bw get password github")
-
-# 4. Lock when done
+# 3. Lock when done
 terminal(command="bw lock")
+```
+
+The helper script handles login (API key from Keychain), unlock (master
+password from Keychain), and `BW_SESSION` export in one `source` call.
+Manual fallback when no Keychain (Linux/Windows):
+
+```bash
+terminal(command="export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw) && bw get password github")
 ```
 
 For repeated interactive sessions, use the helper script:
@@ -76,9 +86,13 @@ terminal(command="source skills/security/bitwarden/scripts/bw-unlock.sh && bw ge
 ```bash
 # Status / session
 bw status                        # JSON: server, lastSync, status
-bw unlock --raw                  # print session key (pipe to export)
-bw unlock --passwordenv BW_PASSWORD --raw   # non-interactive unlock
+bw status | jq -r '.status'      # bare status string
+bw unlock --raw                  # print session key (pipe to export) — fallback only
+bw unlock --passwordenv BW_PASSWORD --raw   # non-interactive fallback (no Keychain)
 bw lock                          # invalidate session, clear BW_SESSION
+
+# STANDARD unlock (master password from Apple Keychain, never .env):
+source skills/security/bitwarden/scripts/bw-unlock.sh   # env -> Keychain(Bitwarden-Master) -> error
 
 # Read secrets (require unlocked session)
 bw get password <search-or-id>       # raw password only
@@ -120,13 +134,18 @@ bw sync
 1. Run `bw status | jq -r '.status'` — if output is `unlocked`, skip to step 3. If
    `locked`, proceed. If `unauthenticated`, run `bw login` first (see
    `references/auth-flow.md`).
-2. Unlock and capture the session key:
+2. **Standard unlock** — source the helper script; it retrieves the master
+   password from Apple Keychain (`Bitwarden-Master`) and exports
+   `BW_SESSION` in the same shell:
+   ```bash
+   source skills/security/bitwarden/scripts/bw-unlock.sh
+   ```
+   No `.env` entry is required — the Keychain entry is the source of truth.
+   Manual fallback (no Keychain — Linux/Windows) captures the key from an
+   env var instead:
    ```bash
    export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw)
    ```
-   If `BW_PASSWORD` is not set, omit `--passwordenv` to be prompted
-   interactively. The helper script `scripts/bw-unlock.sh` wraps this for
-   repeated `terminal` calls.
 3. Verify the session is active:
    ```bash
    bw status | jq -r '.status'   # should print "unlocked"
@@ -189,10 +208,11 @@ afterwards.
   `--passwordenv` / `--passwordfile` will prompt and hang in Hermes'
   non-interactive `terminal` calls. Always use `--passwordenv` or the
   helper script `scripts/bw-unlock.sh`.
-- **macOS Keychain fallback**: the helper script automatically retrieves
-  `BW_PASSWORD` from Keychain (service `Bitwarden-Master`) when the env
-  var is unset. This is macOS-only; on Linux/Windows, set `BW_PASSWORD`
-  or use `--passwordfile` with a `chmod 600` file. See
+- **macOS Keychain is the standard credential source**: `bw-unlock.sh`
+  retrieves `BW_PASSWORD` from Keychain (service `Bitwarden-Master`) on
+  every unlock — never store the master password in `.env` or a password
+  file on macOS. On Linux/Windows (no Keychain) set `BW_PASSWORD` or use
+  `--passwordfile` with a `chmod 600` file. See
   [keychain](references/keychain.md).
 - **Session keys don't persist across terminal calls** unless you `export
   BW_SESSION=...` in the same `terminal` invocation. Each new `terminal`

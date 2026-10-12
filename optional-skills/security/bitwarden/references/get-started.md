@@ -49,7 +49,14 @@ After logging in, the vault is locked. Unlock it to get a session key:
 export BW_SESSION=$(bw unlock --raw)
 ```
 
-For non-interactive use (set in `.env`):
+**Standard (macOS) — master password from Apple Keychain, never `.env`:**
+the helper script retrieves it on every unlock:
+
+```bash
+source scripts/bw-unlock.sh
+```
+
+Fallback for environments without Keychain (Linux/Windows):
 
 ```bash
 export BW_SESSION=$(bw unlock --passwordenv BW_PASSWORD --raw)

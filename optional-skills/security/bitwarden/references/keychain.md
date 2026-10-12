@@ -1,16 +1,19 @@
 # Keychain Integration (macOS)
 
-> **macOS only.** These patterns retrieve the Bitwarden master password from
-> Apple Keychain instead of storing `BW_PASSWORD` in a plaintext `.env` file.
-> The `apple-keychain` Hermes skill documents the `security` CLI conventions;
-> this file is the BitWarden-specific companion.
+> **This is the standing standard for the BW integration.** The BitWarden
+> master password is retrieved from Apple Keychain (service
+> `Bitwarden-Master`) on every unlock — never stored in `.env` or a
+> password file. The `apple-keychain` Hermes skill documents the `security`
+> CLI conventions; this file is the BitWarden-specific companion.
 
-## Why use Keychain?
+## Why Keychain?
 
 Storing `BW_PASSWORD` in `~/.hermes/.env` keeps the master password on disk in
-plaintext (the `.env` file is read by the Hermes runtime). For macOS users who
-already keep passwords in Apple Keychain, retrieving the credential at runtime
-is both safer and integrates with existing MFA / biometric unlock policies.
+plaintext (the `.env` file is read by the Hermes runtime). Keychain is
+encrypted by the macOS user session and accessible only to the logged-in
+user, so the master password never touches the filesystem. Every Hermes
+`bw` call resolves it at runtime via
+`security find-generic-password -s "Bitwarden-Master" -w`.
 
 ## Service naming convention
 
@@ -55,9 +58,9 @@ export BW_CLIENTSECRET=$(security find-generic-password -s "Bitworder-ClientSecr
 
 ## Combined unlock pattern
 
-The `scripts/bw-unlock.sh` helper script already implements this fallback: if
-`BW_PASSWORD` is not set in the environment, it attempts to retrieve the master
-password from Keychain (macOS only) before erroring.
+The `scripts/bw-unlock.sh` helper script implements this as the standard:
+`BW_PASSWORD` env var first, then Keychain (`Bitwarden-Master`), then a hard
+error — on macOS the Keychain lookup always satisfies it.
 
 ```bash
 # In bw-unlock.sh (simplified)
