@@ -16,20 +16,26 @@
 # Bitwarden-Master, Bitworder-ClientID, Bitworder-ClientSecret). See
 # references/keychain.md for one-time setup.
 #
-# NOTE: `bw status --raw` is not recognized in CLI v2026.7.0+; it outputs the
-# full JSON status instead of a single word. We pipe through `jq -r '.status'`
-# for a portable status string.
+# Requires: `bw` on PATH. `jq` is preferred for JSON parsing but NOT required —
+# the script falls back to grep for status extraction when jq is absent.
+#
+# NOTE: CLI v2026.7.0's `bw status --raw` is not recognized for `status`; it
+# outputs the full JSON instead of a single word. We parse the JSON directly.
 #
 set -euo pipefail
 
-# --- Helper: get vault status as a bare string --------------------------------
+# --- Helper: get vault status as a bare string (jq-free fallback) -------------
 _status() {
-  bw status 2>/dev/null | jq -r '.status // empty' 2>/dev/null
+  if command -v jq >/dev/null 2>&1; then
+    bw status 2>/dev/null | jq -r '.status // empty' 2>/dev/null || true
+  else
+    bw status 2>/dev/null | grep -o '"status":"[^"]*"' | cut -d'"' -f4 || true
+  fi
 }
 
 # --- Re-export BW_SESSION if already present and still valid ----------------
 if [ -n "${BW_SESSION:-}" ]; then
-  if bw --session "$BW_SESSION" status 2>/dev/null | jq -r '.status // empty' 2>/dev/null | grep -q unlocked; then
+  if [ "$(_status)" = "unlocked" ] && bw --session "$BW_SESSION" status 2>/dev/null >/dev/null; then
     echo "bw-unlock: already unlocked"
     return 0 2>/dev/null || true
   fi
@@ -70,7 +76,7 @@ else
 fi
 
 # --- Verify -----------------------------------------------------------------
-if _status | grep -q unlocked; then
+if [ "$(_status)" = "unlocked" ]; then
   echo "bw-unlock: vault unlocked"
   return 0 2>/dev/null || true
 else

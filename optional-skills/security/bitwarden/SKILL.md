@@ -93,16 +93,23 @@ bw list items --url <domain> --search <term>
 bw generate -ulns --length 20        # 20-char password
 bw generate -p --words 4 --separator space  # 4-word passphrase
 
-# Create / edit (use template + jq + encode pipeline)
-bw get template item | jq '.login.username="alice" | .login.password=$(bw generate -ulns --length 20)' | bw encode | bw create item
-bw get item <id> | jq '.login.password="newpass"' | bw encode | bw edit item <id>
+# Create / edit (save template to file first — never nest jq inside jq)
+bw get template item > /tmp/bw-item.json
+jq --arg pw "$(bw generate -ulns --length 24)" \
+   '.name = "My Service" | .login.username = "alice" | .login.password = $pw | .login.uris = [{"uri": "https://my.service.com", "match": 3}]' \
+   /tmp/bw-item.json | bw encode | bw create item
+bw get item <id> | jq --arg pw "$(bw generate -ulns --length 24)" '.login.password = $pw' | bw encode | bw edit item <id>
 
 # Send / receive
 bw send -n "api-key" -d 1 --hidden "s3cr3t" --maxAccessCount 1
+bw send list                          # list Sends (NOT `bw list send`)
+bw send template text                 # Send JSON template (text or file)
+bw send delete <send-id>
 bw receive --password env123 <send-url>
 
-# Export / import / sync
+# Export / import / sync (json/csv exports are PLAINTEXT — treat the output file as a secret)
 bw export --format json --output ~/backup-vault.json
+bw import --formats                   # list supported import formats
 bw sync
 ```
 
@@ -142,18 +149,29 @@ bw sync
 
 ### Create a login item
 
+**Reliable pattern** — save the template to a file, then jq the file.
+Nested `jq` inside `jq` (command substitution inside a jq program) fails with
+a syntax error — never chain them.
+
 1. Get the item template:
    ```bash
-   bw get template item
+   bw get template item > /tmp/bw-item.json
    ```
-2. Modify with `jq` to set name, username, password (optionally via
-   `bw generate`), and URI:
+2. Modify with `jq` — set name, username, password (optionally via
+   `bw generate`), and **`uris` as an array** (a `.login.uri` string is
+   silently dropped by the server):
    ```bash
-   bw get template item | jq '.name="My Service" | .login=(bw get template item.login | jq ".username=\"alice\" | .password=\"$(bw generate -ulns --length 24)\")") | .login.uri="https://my.service.com"' | bw encode
+   jq --arg pw "$(bw generate -ulns --length 24)" \
+      '.name = "My Service"
+       | .login.username = "alice"
+       | .login.password = $pw
+       | .login.uris = [{"uri": "https://my.service.com", "match": 3}]' \
+      /tmp/bw-item.json | bw encode | bw create item
    ```
-3. Create the item:
+   `match` values: 0=Domain, 1=Host, 2=StartsWith, 3=Exact, 4=Regex, 5=None.
+3. Create the item (already piped above). Verify with:
    ```bash
-   bw create item <encoded-json>
+   bw get item <name> | jq '{name, username: .login.username, uris: .login.uris}'
    ```
 
 ### Generate a password without storing it
@@ -183,6 +201,23 @@ afterwards.
 - **`bw get` returns only one result** — if multiple items match the search
   string, it errors. Use `bw list items --search <term> | jq` to find the
   exact `id`, then `bw get item <id>`.
+- **`.login.uri` string is silently dropped** on create — the server expects
+  `.login.uris` as an array of `{"uri": ..., "match": N}` objects. A
+  `.login.uri = "https://..."` assignment creates an item with no URI at all
+  (verified: `bw get uri` returns "Not found").
+- **Never nest `jq` inside `jq`** — command substitution like
+  `jq '... | .login = ($(bw get template item.login | jq "...") ...)'` fails
+  with a jq syntax error and can crash the CLI with EPIPE. Save the template
+  to a file first (`bw get template item > /tmp/tpl.json`), then jq the file.
+- **`bw list send` is invalid** — `list` only accepts items, folders,
+  collections, org-collections, org-members, organizations. Use
+  `bw send list` (the subcommand) instead.
+- **`bw report` does not exist** in CLI v2026.7.0 — use
+  `bw export --format json` + `jq` for password-strength analysis.
+- **Plaintext exports** — `bw export --format json` and `--format csv`
+  produce **unencrypted** files (`"encrypted": false` in the JSON header).
+  Only `--format encrypted_json` is password-protected. Treat any export
+  file as a plaintext secret (chmod 600, delete after use).
 - **Passwords are not logged**: the CLI never echoes passwords in JSON output
   unless you explicitly request them, so `bw get password` is safe to pipe but
   `bw get item` will include the password in the full JSON.

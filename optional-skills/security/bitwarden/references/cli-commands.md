@@ -18,17 +18,18 @@
 
 ## Authentication
 
-### `bw login [email] [password]`
+### `bw login [options] [email] [password]`
 
 Log into a user account.
 
 **Options:**
 - `--method <n>` — 2FA method: `0` (Authenticator), `1` (Email), `3` (YubiKey)
 - `--code <code>` — 2FA code
-- `--sso` — SSO login (opens browser)
+- `--sso [identifier]` — SSO login (opens browser; optional org identifier)
 - `--apikey` — login with API key (reads `BW_CLIENTID` / `BW_CLIENTSECRET`)
-- `--check` — check login status without logging in
-- `--raw` — return session key only
+- `--passwordenv <var>` — read password from env var
+- `--passwordfile <path>` — read password from file (first line)
+- `--check` — check login status without logging in (prints "You are logged in!")
 
 ```bash
 bw login
@@ -48,12 +49,13 @@ Unlock the vault and return a new session key.
 **Options:**
 - `--passwordenv <var>` — read password from env var
 - `--passwordfile <path>` — read password from file (first line)
-- `--check` — check lock status without unlocking
-- `--raw` — return session key only
+- `--check` — check lock status without unlocking (prints "Vault is locked." /
+  "Vault is unlocked!")
 
 ```bash
 bw unlock
 bw unlock --passwordenv BW_PASSWORD --raw
+bw unlock --check
 export BW_SESSION=$(bw unlock --raw)
 ```
 
@@ -237,16 +239,13 @@ bw generate -p --words 5 --separator " "
 bw generate -p -c --words 4
 ```
 
-### `bw report password-health [options]`
+## Removed in v2026.7.0 — commands that DO NOT exist
 
-Generate a password health report.
-
-**Options:**
-- `--no-check-exposed` — skip breach checks (no network requests)
-
-```bash
-bw report password-health > health.json
-```
+| Command | Status |
+|---|---|
+| `bw report password-health` | **Not in v2026.7.0.** Use `bw export --format json` + jq for password-strength analysis. |
+| `bw device-approval` | **Not in v2026.7.0.** Enterprise SSO device approval is only in the desktop/browser clients. |
+| `bw list send` | **Invalid object.** `list` accepts only: items, folders, collections, org-collections, org-members, organizations. Use `bw send list`. |
 
 ### `bw export [options]`
 
@@ -255,13 +254,19 @@ Export vault data as CSV, JSON, encrypted_json, or ZIP.
 **Options:**
 - `--format <csv|json|encrypted_json|zip>` — output format
 - `--output <path>` — output file/directory
-- `--password <pwd>` — encrypt `encrypted_json` exports
+- `--password [pwd]` — encrypt `encrypted_json` exports with a custom password
+  (instead of your account encryption key; **only applies to `encrypted_json`**)
 - `--organizationid <id>` — export an org vault
-- `--raw` — write to stdout
+
+> **WARNING — plaintext exports:** `--format json` and `--format csv` write
+> **unencrypted** files. The JSON export header contains `"encrypted": false`.
+> Only `encrypted_json` (and zip, which wraps it) is password-protected.
+> Treat any export file as a plaintext secret: `chmod 600`, delete after use.
 
 ```bash
-bw export --format json --output ~/backup.json
-bw --raw export --format json
+bw export --format json --output ~/backup.json          # PLAINTEXT
+bw export --format csv --output ~/backup.csv            # PLAINTEXT
+bw export --format encrypted_json --password "pw" --output ~/backup.json  # encrypted
 ```
 
 ### `bw import <format> <path>`
@@ -321,7 +326,23 @@ bw send -f ./file.ext -d 14 --password "accesscode"
 echo "text to send" | bw send -n "meeting-notes"
 ```
 
-Subcommands: `list`, `template`, `get`, `edit`, `delete`, `remove-password`
+**Subcommands** (use these instead of `bw list send`):
+
+| Subcommand | Purpose |
+|---|---|
+| `bw send list` | List all your Sends |
+| `bw send template <text\|file>` | JSON template for the Send create/edit flow |
+| `bw send get <id>` | Get a Send by ID |
+| `bw send create <encodedJson>` | Create a Send from a template |
+| `bw send edit <id> <encodedJson>` | Edit a Send |
+| `bw send delete <id>` | Delete a Send |
+| `bw send remove-password <id>` | Remove the access password from a Send |
+| `bw receive <url>` | Access a Send (also available as a `bw send` subcommand) |
+
+> **`bw send create` requires a valid `deletionDate`** — set
+> `.deletionDate` to a future ISO-8601 timestamp in the template, or use the
+> quick flag form (`-d <days>`) which computes it for you. `null` fails with
+> "Must specify a valid deletion date after the current time".
 
 ### `bw receive [options] <url>`
 
@@ -383,20 +404,24 @@ Commonly used fields in `item.login` JSON when constructing items via
 
 | Field | Type |
 |---|---|
-| `login.uri` / `login.uris` | URL string or array of `{uri, match}` objects |
+| `login.uris` | array of `{uri: string, match: int}` — **NOT a string**; `.login.uri` is silently dropped |
 | `login.username` | string |
 | `login.password` | string |
 | `login.totp` | TOTP secret string (seed, not code) |
+| `login.fido2Credentials` | array (populated by passkey registrations; do not set manually) |
 | `login.passwordHistory` | array of `{value, lastUsed}` |
 | `favorite` | boolean (top-level, not under `login`) |
+| `reprompt` | int (top-level; 0 = no reprompt, 1 = reprompt before reveal) |
+| `fields` | array of `{name, value, type}` (top-level; type 0=Text, 1=Hidden, 2=Boolean) |
+| `type` | int (top-level; 1=Login, 2=SecureNote, 3=Card, 4=Identity, 5=SSHKey) |
 
 ## Export formats
 
 | Format | Description |
 |---|---|
-| `csv` | Comma-separated values (selected item type fields only) |
-| `json` | Encrypted JSON (default; requires account password to read) |
-| `encrypted_json` | Encrypted vault export (requires export password) |
-| `zip` | Encrypted ZIP archive (encrypted_json + attachments) |
+| `csv` | Comma-separated values — **PLAINTEXT** |
+| `json` | Plaintext JSON (`"encrypted": false` in header) — **PLAINTEXT** |
+| `encrypted_json` | Password-protected export (use `--password`) |
+| `zip` | Wraps encrypted_json + attachments |
 
 See `bw export --formats` for the authoritative list (varies by vault type).
