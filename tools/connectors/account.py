@@ -63,10 +63,14 @@ def find_or_start_operation(
 
 
 def _run(start: AccountOperationStart, action: str) -> None:
+    from hermes_logging import clear_session_context, set_session_context
+
+    # Tag this thread's log lines with the operation, the way a turn thread carries its session.
+    set_session_context(start.operation.session_key)
     try:
         drive_operation(
             start.operation,
-            managed.managed_kind(managed.managed_client(), action, force=False),
+            managed.managed_kind(managed.managed_client(initiator=managed.DESKTOP_PAGE), action, force=False),
             connection_callback=lambda _payload: start.done.set(),
             tick_seconds=managed.WATCH_TICK_SECONDS,
             with_urls_in_result=False,
@@ -76,6 +80,7 @@ def _run(start: AccountOperationStart, action: str) -> None:
         start.failed = True
     finally:
         start.done.set()
+        clear_session_context()
 
 
 def wait_for_prepare(start: AccountOperationStart) -> bool:

@@ -444,7 +444,7 @@ def _string_list_arg(args: Dict[str, Any], key: str, *, dedupe: bool, max_items:
 
 def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[str, Any]],
                          config: Optional[ToolSearchConfig] = None,
-                         connector_search: Optional[Any] = None) -> str:
+                         connector_search: Optional[Any] = None, call: Optional[Any] = None) -> str:
     config = config or load_config()
     queries, err = _string_list_arg(args, "queries", dedupe=False, max_items=_MAX_QUERIES_PER_CALL,
                                     retry_hint="Retry with fewer, more targeted queries.")
@@ -458,7 +458,7 @@ def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[s
     hosted_failure: Optional[str] = None
     if connections_in_scope(current_tool_defs):
         remote_entries, hosted_failure = connector_entries_by_group(
-            queries, connector_search=connector_search)
+            queries, connector_search=connector_search, call=call)
     results: List[Dict[str, Any]] = []
     tools_map: Dict[str, Dict[str, Any]] = {}
     available_sources = _available_source_summary(catalog)
@@ -487,7 +487,7 @@ def dispatch_tool_search(args: Dict[str, Any], *, current_tool_defs: List[Dict[s
 
 def dispatch_tool_describe(args: Dict[str, Any], *, current_tool_defs: List[Dict[str, Any]],
                            config: Optional[ToolSearchConfig] = None,
-                           connector_describe: Optional[Any] = None) -> str:
+                           connector_describe: Optional[Any] = None, call: Optional[Any] = None) -> str:
     config = config or load_config_readonly()
     names, err = _string_list_arg(
         args, "names", dedupe=True, max_items=_MAX_DESCRIBE_NAMES_PER_CALL,
@@ -496,7 +496,7 @@ def dispatch_tool_describe(args: Dict[str, Any], *, current_tool_defs: List[Dict
         return err
     deferrable = _deferrable_in(current_tool_defs)
     by_name = {name: _fn(td) for td, name in zip(deferrable, _tool_def_names(deferrable)) if name}
-    remote_schemas, hosted_failure = remote_schemas_for(names, current_tool_defs, connector_describe)
+    remote_schemas, hosted_failure = remote_schemas_for(names, current_tool_defs, connector_describe, call=call)
 
     tools: Dict[str, Dict[str, Any]] = {}
     not_found: List[str] = []

@@ -200,6 +200,7 @@ def _account_connector_list(rid):
 
 def _account_connector_connect(rid, request):
     from tools.connectors import account
+    from tools.connectors.managed import DESKTOP_PAGE
     from tui_gateway.connector_payload import connector_ui_payload
     from tui_gateway.contracts.connectors import ConnectorErrorReason
 
@@ -211,7 +212,7 @@ def _account_connector_connect(rid, request):
 
             targets = [start.operation.target(name) for name in request.connectors]
             if any(target.state in (TargetState.failed, TargetState.expired) for target in targets):
-                return _reissue(rid, start.operation, {"connectors": request.connectors})
+                return _reissue(rid, start.operation, {"connectors": request.connectors}, initiator=DESKTOP_PAGE)
             return _ok(rid, connector_ui_payload(_operation_view(start.operation)))
         if not account.wait_for_prepare(start):
             return _ok(rid, connector_ui_payload(_operation_view(start.operation)))
@@ -253,7 +254,7 @@ def _connector_rpc(rid, params, action):
         _current_runtime_session_record.reset(runtime_token)
 
 
-def _reissue(rid, operation, args):
+def _reissue(rid, operation, args, *, initiator=None):
     from tools.connectors.run import (
         LINK_STILL_VALID,
         MIXED_KINDS,
@@ -266,7 +267,7 @@ def _reissue(rid, operation, args):
     from tui_gateway.connector_payload import connector_ui_payload
     from tui_gateway.contracts.connectors import ConnectorErrorReason
 
-    reason = reissue(operation, args["connectors"])
+    reason = reissue(operation, args["connectors"], initiator=initiator)
     if reason == UNKNOWN_TARGET:
         return _connector_rpc_error(rid, 4004, ConnectorErrorReason.unknown_target, "No such target on the open operation.")
     if reason == MIXED_KINDS:
